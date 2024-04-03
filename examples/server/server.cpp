@@ -3254,7 +3254,6 @@ int main(int argc, char ** argv) {
                 while (true) {
                     server_task_result result = ctx_server.queue_results.recv(id_task);
                     std::string this_content = json_value(result.data, "content", std::string(""));
-                    printf("this_content: %s\n", this_content.c_str());
                     if (this_content != "") {
                         all_content += this_content;
                         continue;
@@ -3267,8 +3266,6 @@ int main(int argc, char ** argv) {
 
                     if (!result.error) {
                         std::vector<json> result_array = format_partial_response_oaicompat(result.data, completion_id);
-                        printf("result_array: %s\n", result_array[0].dump(-1, ' ', false, json::error_handler_t::replace).c_str());
-
                         for (auto it = result_array.begin(); it != result_array.end(); ++it) {
                             if (!it->empty()) {
                                 const std::string str =
