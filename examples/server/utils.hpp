@@ -745,6 +745,66 @@ static std::vector<json> format_partial_response_oaicompat(json result, const st
     bool stopped_limit  = json_value(result, "stopped_limit", false);
     std::string content = json_value(result, "content",       std::string(""));
 
+    std::vector<json> parsed_content = parsePythonFunctionCalls(content);
+    std::time_t t = std::time(0);
+    if (!parsed_content.empty()) {
+        std::vector<json> res;
+        json choices1 = json::array({json{{"finish_reason", nullptr},
+                                            {"index", 0},
+                                            {"delta", json{{"role", "assistant"}}}}});
+        
+        json ret = json{
+            {"choices", choices1},
+            {"created", t},
+            {"id",      completion_id},
+            {"model",   modelname},
+            {"object",  "chat.completion.chunk"}
+        };
+        res.push_back(ret);
+
+        for (size_t i = 0; i < parsed_content.size(); ++i) {
+                const auto &pc = parsed_content[i];
+                // Use 'pc' and 'i' as needed
+                json tool_call1;
+                tool_call1["id"] = pc["id"];
+                tool_call1["type"] = "function";
+                tool_call1["index"] = i;
+                tool_call1["function"] = json{
+                    {"name" , pc["name"]},
+                    {"arguments" , ""},
+                };
+                json ret1 = json{
+                    {"choices", json::array({json{{"finish_reason", nullptr},
+                                            {"index", 0},
+                                            {"delta", json{{"tool_calls", std::vector<json>{tool_call1}}}}}})
+                                            },
+                    {"created", t},
+                    {"id",      completion_id},
+                    {"model",   modelname},
+                    {"object",  "chat.completion.chunk"}
+                };
+                res.push_back(ret1);
+                json tool_call2;
+                tool_call2["index"] = i;
+                tool_call2["function"] = json{
+                    {"name" , ""},
+                    {"arguments" , pc["kwargs"].dump()},
+                };
+                json ret2 = json{
+                    {"choices", json::array({json{{"finish_reason", nullptr},
+                                            {"index", 0},
+                                            {"delta", json{{"tool_calls", std::vector<json>{tool_call2}}}}}})
+                                            },
+                    {"created", t},
+                    {"id",      completion_id},
+                    {"model",   modelname},
+                    {"object",  "chat.completion.chunk"}
+                };
+                res.push_back(ret2);
+            }
+        return res;
+    }
+
     std::string finish_reason;
     if (stopped_word || stopped_eos) {
         finish_reason = "stop";
@@ -753,7 +813,7 @@ static std::vector<json> format_partial_response_oaicompat(json result, const st
         finish_reason = "length";
     }
 
-    std::time_t t = std::time(0);
+    
 
     json choices;
 

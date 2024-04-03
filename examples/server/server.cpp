@@ -3250,10 +3250,24 @@ int main(int argc, char ** argv) {
             ctx_server.queue_results.remove_waiting_task_id(id_task);
         } else {
             const auto chunked_content_provider = [id_task, &ctx_server, completion_id](size_t, httplib::DataSink & sink) {
+                std::string all_content = "";
                 while (true) {
                     server_task_result result = ctx_server.queue_results.recv(id_task);
+                    std::string this_content = json_value(result.data, "content", std::string(""));
+                    printf("this_content: %s\n", this_content.c_str());
+                    if (this_content != "") {
+                        all_content += this_content;
+                        continue;
+                    } else {
+                        if (all_content != "") {
+                            result.data["content"] = all_content;
+                            all_content = "";
+                        }
+                    }
+
                     if (!result.error) {
                         std::vector<json> result_array = format_partial_response_oaicompat(result.data, completion_id);
+                        printf("result_array: %s\n", result_array[0].dump(-1, ' ', false, json::error_handler_t::replace).c_str());
 
                         for (auto it = result_array.begin(); it != result_array.end(); ++it) {
                             if (!it->empty()) {
