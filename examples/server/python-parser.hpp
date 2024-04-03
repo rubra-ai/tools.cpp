@@ -61,7 +61,7 @@ static void parseFunctionCalls(const TSNode& node, std::vector<json>& calls, con
         
         // Extract the function name
         call["name"] = std::string(source_code + ts_node_start_byte(functionNode), ts_node_end_byte(functionNode) - ts_node_start_byte(functionNode));
-        
+        printf("function name: %s\n", call["name"].dump().c_str());
         unsigned int numArgs = ts_node_named_child_count(argumentsNode);
         for (unsigned int i = 0; i < numArgs; ++i) {
             TSNode argNode = ts_node_named_child(argumentsNode, i);

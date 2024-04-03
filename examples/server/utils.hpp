@@ -339,6 +339,7 @@ static json probs_vector_to_json(const llama_context * ctx, const std::vector<co
 
 static std::string rubra_format_function_call_str(const std::vector<json> & functions) {
     std::string final_str = "You have access to the following tools:\n";
+    printf("rubra_format_function_call_str parsing...\n");
     json type_mapping = {
         {"string", "str"},
         {"integer", "int"},
@@ -353,9 +354,9 @@ static std::string rubra_format_function_call_str(const std::vector<json> & func
     for (const auto & function : functions) {
         const auto &spec = function.contains("function") ? function["function"] : function;
         const std::string func_name = spec.value("name", "");
-        const std::string description = spec.value("description", "");
-        const auto& parameters = spec.contains("parameters") ? spec["parameters"].value("properties", json({})) : json({});
-        const auto& required_params = spec.contains("parameters") ? spec["parameters"].value("required", std::vector<std::string>()) : std::vector<std::string>();
+        const std::string description = spec.contains("description") ? spec["description"].get<std::string>() : "";
+        const auto& parameters = spec.contains("parameters") && spec["parameters"].contains("properties")? spec["parameters"].value("properties", json({})) : json({});
+        const auto& required_params = spec.contains("parameters") && spec["parameters"].contains("properties")? spec["parameters"].value("required", std::vector<std::string>()) : std::vector<std::string>();
 
         std::vector<std::string> func_args;
         for (auto it = parameters.begin(); it != parameters.end(); ++it) {
