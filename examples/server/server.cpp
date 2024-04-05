@@ -3252,7 +3252,10 @@ int main(int argc, char ** argv) {
                 std::string all_content = "";
                 while (true) {
                     server_task_result result = ctx_server.queue_results.recv(id_task);
+
                     std::string this_content = json_value(result.data, "content", std::string(""));
+                    // TODO: this block is just a hacky solution to enable function calling in streaming -- by concat the streaming chunks.
+                    // Ideally: If the first a few tokens is <<functions>>, it should keep waiting for all chunks, otherwise do normal stream logic.
                     if (this_content != "") {
                         all_content += this_content;
                         continue;
