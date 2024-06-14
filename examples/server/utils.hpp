@@ -6,11 +6,14 @@
 // Change JSON_ASSERT from assert() to GGML_ASSERT:
 #define JSON_ASSERT GGML_ASSERT
 #include "json.hpp"
+#include "function-call.hpp"
+#include "function-call-parser.hpp"
 
 #include <string>
 #include <vector>
 #include <sstream>
 #include <random>
+#include <unordered_map>
 
 #define DEFAULT_OAICOMPAT_MODEL "gpt-3.5-turbo-0613"
 
@@ -147,6 +150,7 @@ inline std::string format_chat(const struct llama_model * model, const std::stri
     const std::string formatted_chat(buf.data(), res);
 
     LOG_VERBOSE("formatted_chat", {{"text", formatted_chat.c_str()}});
+    printf("formatted_chat: %s\n", formatted_chat.c_str());
 
     return formatted_chat;
 }
@@ -355,6 +359,10 @@ static json oaicompat_completion_params_parse(
     json llama_params;
 
     llama_params["__oaicompat"] = true;
+    json tool_name_map;
+    const std::vector<json> expanded_messages = expand_messages(body, tool_name_map);
+    llama_params["prompt"] = format_chat(model, chat_template, expanded_messages);
+    llama_params["tool_name_map"] = tool_name_map;
 
     // Map OpenAI parameters to llama.cpp parameters
     //
@@ -375,7 +383,7 @@ static json oaicompat_completion_params_parse(
     llama_params["top_p"]             = json_value(body,   "top_p",             1.0);
 
     // Apply chat template to the list of messages
-    llama_params["prompt"] = format_chat(model, chat_template, body.at("messages"));
+    // llama_params["prompt"] = format_chat(model, chat_template, body.at("messages"));
 
     // Handle "stop" field
     if (body.contains("stop") && body.at("stop").is_string()) {
@@ -410,12 +418,12 @@ static json oaicompat_completion_params_parse(
     }
 
     // Params supported by OAI but unsupported by llama.cpp
-    static const std::vector<std::string> unsupported_params { "tools", "tool_choice" };
-    for (auto & param : unsupported_params) {
-        if (body.contains(param)) {
-            throw std::runtime_error("Unsupported param: " + param);
-        }
-    }
+    // static const std::vector<std::string> unsupported_params { "tools", "tool_choice" };
+    // for (auto & param : unsupported_params) {
+    //     if (body.contains(param)) {
+    //         throw std::runtime_error("Unsupported param: " + param);
+    //     }
+    // }
 
     // Copy remaining properties to llama_params
     // This allows user to use llama.cpp-specific params like "mirostat", "tfs_z",... via OAI endpoint.
@@ -437,19 +445,45 @@ static json format_final_response_oaicompat(const json & request, json result, c
     int num_prompt_tokens    = json_value(result, "tokens_evaluated", 0);
     std::string content      = json_value(result, "content", std::string(""));
 
+    std::vector<json> parsed_content = rubra_fc_json_tool_extractor(content);
     std::string finish_reason = "length";
     if (stopped_word || stopped_eos) {
         finish_reason = "stop";
     }
 
-    json choices =
-        streaming ? json::array({json{{"finish_reason", finish_reason},
-                                        {"index", 0},
-                                        {"delta", json::object()}}})
-                  : json::array({json{{"finish_reason", finish_reason},
+    json choices;
+
+    if (streaming) {
+        choices = json::array({json{{"finish_reason", finish_reason},
+                                    {"index", 0},
+                                    {"delta", json::object()}}});
+    } else {
+        if (parsed_content.empty()) {
+            choices = json::array({json{{"finish_reason", finish_reason},
                                         {"index", 0},
                                         {"message", json{{"content", content},
                                                          {"role", "assistant"}}}}});
+        } else {
+            std::vector<json> oai_format_tool_calls;
+            for (size_t i = 0; i < parsed_content.size(); ++i) {
+                const auto &pc = parsed_content[i];
+                // Use 'pc' and 'i' as needed
+                json tool_call;
+                tool_call["id"] = pc["id"];
+                tool_call["type"] = "function";
+
+                tool_call["function"] = json{
+                    {"name" , pc["name"]},
+                    {"arguments" , pc["kwargs"].dump()},
+                };
+                oai_format_tool_calls.push_back(tool_call);
+            }
+            choices = json::array({json{{"finish_reason", "tool_calls"},
+                                        {"index", 0},
+                                        {"message", json{{"tool_calls", oai_format_tool_calls},
+                                                         {"role", "assistant"}}}}});
+        }
+    }
 
     std::time_t t = std::time(0);
 
@@ -466,6 +500,7 @@ static json format_final_response_oaicompat(const json & request, json result, c
         }},
         {"id", completion_id}
     };
+    printf("==============formatted_final_response_oaicompat================\n %s\n\n", res.dump().c_str());
 
     if (server_verbose) {
         res["__verbose"] = result;
