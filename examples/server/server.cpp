@@ -3104,7 +3104,6 @@ int main(int argc, char ** argv) {
                             if (leading_str.length() >= 15) {
                                 if (leading_str.find("starttoolcall") != std::string::npos) {
                                     is_function_call = true;
-                                    printf("####set function call to TRUE because of str: %s", leading_str.c_str());
                                 }
                                 checked_function_call = true;
                             }
@@ -3138,7 +3137,6 @@ int main(int argc, char ** argv) {
                         
                         if (result.stop) {
                             if (leading_str.length() > 0) {
-                                printf("### Entering last stage?\nwith leading str as : %s \n\n", leading_str.c_str());
                                 last_result_data["content"] = leading_str;
                                 std::vector<json> result_array = format_partial_response_oaicompat(last_result_data, completion_id);
 
