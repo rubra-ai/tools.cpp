@@ -526,6 +526,7 @@ static std::vector<json> format_partial_response_oaicompat(json result, const st
     bool stopped_eos    = json_value(result, "stopped_eos",   false);
     bool stopped_limit  = json_value(result, "stopped_limit", false);
     std::string content = json_value(result, "content",       std::string(""));
+    std::vector<json> parsed_content = rubra_fc_json_tool_extractor(content);
 
     std::string finish_reason;
     if (stopped_word || stopped_eos) {
@@ -562,18 +563,41 @@ static std::vector<json> format_partial_response_oaicompat(json result, const st
                             {"model", modelname},
                             {"object", "chat.completion.chunk"}};
 
-                json second_ret = json{
-                            {"choices", json::array({json{{"finish_reason", nullptr},
-                                                            {"index", 0},
-                                                            {"delta", json{
-                                                            {"content", content}}}
-                                                            }})},
-                            {"created", t},
-                            {"id", completion_id},
-                            {"model", modelname},
-                            {"object", "chat.completion.chunk"}};
+                if (parsed_content.empty()) {
+                    json second_ret = json{
+                                {"choices", json::array({json{{"finish_reason", nullptr},
+                                                                {"index", 0},
+                                                                {"delta", json{
+                                                                {"content", content}}}
+                                                                }})},
+                                {"created", t},
+                                {"id", completion_id},
+                                {"model", modelname},
+                                {"object", "chat.completion.chunk"}};
 
-                return std::vector<json>({initial_ret, second_ret});
+                    return std::vector<json>({initial_ret, second_ret});
+                }
+                else {
+                    std::vector<json> oai_format_tool_calls;
+                    for (size_t i = 0; i < parsed_content.size(); ++i) {
+                        const auto &pc = parsed_content[i];
+                        // Use 'pc' and 'i' as needed
+                        json tool_call;
+                        tool_call["id"] = pc["id"];
+                        tool_call["type"] = "function";
+
+                        tool_call["function"] = json{
+                            {"name" , pc["name"]},
+                            {"arguments" , pc["kwargs"]},
+                        };
+                        oai_format_tool_calls.push_back(tool_call);
+                    }
+                    choices = json::array({json{{"finish_reason", nullptr},
+                                                {"index", 0},
+                                                {"delta", json{{"tool_calls", oai_format_tool_calls},
+                                                                {"role", "assistant"}}}}});
+                }
+                
             }
         } else {
             // Some idiosyncrasy in task processing logic makes several trailing calls
@@ -582,14 +606,38 @@ static std::vector<json> format_partial_response_oaicompat(json result, const st
                 return std::vector<json>({json::object()});
             }
 
-            choices = json::array({json{
-                {"finish_reason", nullptr},
-                {"index", 0},
-                {"delta",
-                json{
-                    {"content", content},
-                }},
-            }});
+            if (parsed_content.empty()) {
+                choices = json::array({json{
+                    {"finish_reason", nullptr},
+                    {"index", 0},
+                    {"delta",
+                    json{
+                        {"content", content},
+                    }},
+                }});
+            }
+            else {
+                std::vector<json> oai_format_tool_calls;
+                for (size_t i = 0; i < parsed_content.size(); ++i) {
+                    const auto &pc = parsed_content[i];
+                    // Use 'pc' and 'i' as needed
+                    json tool_call;
+                    tool_call["id"] = pc["id"];
+                    tool_call["type"] = "function";
+                    tool_call["index"] = i;
+
+                    tool_call["function"] = json{
+                        {"name" , pc["name"]},
+                        {"arguments" , pc["kwargs"]},
+                    };
+                    oai_format_tool_calls.push_back(tool_call);
+                }
+                choices = json::array({json{{"finish_reason", nullptr},
+                                            {"index", 0},
+                                            {"delta", json{{"tool_calls", oai_format_tool_calls},
+                                                            {"role", "assistant"}}}}});
+            }
+            
         }
     }
 

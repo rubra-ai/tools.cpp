@@ -3092,26 +3092,91 @@ int main(int argc, char ** argv) {
             ctx_server.queue_results.remove_waiting_task_id(id_task);
         } else {
             const auto chunked_content_provider = [id_task, &ctx_server, completion_id](size_t, httplib::DataSink & sink) {
+                std::string leading_str = "";
+                bool is_function_call = false;
+                bool checked_function_call = false;
+                json last_result_data;
                 while (true) {
                     server_task_result result = ctx_server.queue_results.recv(id_task);
                     if (!result.error) {
-                        std::vector<json> result_array = format_partial_response_oaicompat(result.data, completion_id);
+                        if (!checked_function_call) {
+                            leading_str += result.data.value("content", "");
+                            if (leading_str.length() >= 15) {
+                                if (leading_str.find("starttoolcall") != std::string::npos) {
+                                    is_function_call = true;
+                                    printf("####set function call to TRUE because of str: %s", leading_str.c_str());
+                                }
+                                checked_function_call = true;
+                            }
+                        }
+                        else {
+                            if (is_function_call) {
+                                leading_str += result.data.value("content", "");
+                            }
+                            else {
+                                if (leading_str.length() > 0) {
+                                    result.data["content"] = leading_str + result.data.value("content", "");
+                                    leading_str = "";
+                                }
+                                std::vector<json> result_array = format_partial_response_oaicompat(result.data, completion_id);
 
-                        for (auto it = result_array.begin(); it != result_array.end(); ++it) {
-                            if (!it->empty()) {
-                                const std::string str =
-                                    "data: " +
-                                    it->dump(-1, ' ', false, json::error_handler_t::replace) +
-                                    "\n\n";
-                                LOG_VERBOSE("data stream", {{"to_send", str}});
-                                if (!sink.write(str.c_str(), str.size())) {
-                                    ctx_server.queue_results.remove_waiting_task_id(id_task);
-                                    return false;
+                                for (auto it = result_array.begin(); it != result_array.end(); ++it) {
+                                    if (!it->empty()) {
+                                        const std::string str =
+                                            "data: " +
+                                            it->dump(-1, ' ', false, json::error_handler_t::replace) +
+                                            "\n\n";
+                                        LOG_VERBOSE("data stream", {{"to_send", str}});
+                                        if (!sink.write(str.c_str(), str.size())) {
+                                            ctx_server.queue_results.remove_waiting_task_id(id_task);
+                                            return false;
+                                        }
+                                    }
                                 }
                             }
                         }
+                        
                         if (result.stop) {
+                            if (leading_str.length() > 0) {
+                                printf("### Entering last stage?\nwith leading str as : %s \n\n", leading_str.c_str());
+                                last_result_data["content"] = leading_str;
+                                std::vector<json> result_array = format_partial_response_oaicompat(last_result_data, completion_id);
+
+                                for (auto it = result_array.begin(); it != result_array.end(); ++it) {
+                                    if (!it->empty()) {
+                                        const std::string str =
+                                            "data: " +
+                                            it->dump(-1, ' ', false, json::error_handler_t::replace) +
+                                            "\n\n";
+                                        LOG_VERBOSE("data stream", {{"to_send", str}});
+                                        if (!sink.write(str.c_str(), str.size())) {
+                                            ctx_server.queue_results.remove_waiting_task_id(id_task);
+                                            return false;
+                                        }
+                                    }
+                                }
+                                
+                                result_array = format_partial_response_oaicompat(result.data, completion_id);
+
+                                for (auto it = result_array.begin(); it != result_array.end(); ++it) {
+                                    if (!it->empty()) {
+                                        const std::string str =
+                                            "data: " +
+                                            it->dump(-1, ' ', false, json::error_handler_t::replace) +
+                                            "\n\n";
+                                        LOG_VERBOSE("data stream", {{"to_send", str}});
+                                        if (!sink.write(str.c_str(), str.size())) {
+                                            ctx_server.queue_results.remove_waiting_task_id(id_task);
+                                            return false;
+                                        }
+                                    }
+                                }
+                            }
+                            
                             break;
+                        }
+                        else {
+                            last_result_data = result.data;
                         }
                     } else {
                         const std::string str =
