@@ -3096,91 +3096,27 @@ int main(int argc, char ** argv) {
                 bool is_function_call = false;
                 bool checked_function_call = false;
                 json last_result_data;
+
+                auto process_and_send_data = [&](const json& data) {
+                    std::vector<json> result_array = format_partial_response_oaicompat(data, completion_id);
+
+                    for (const auto& item : result_array) {
+                        if (!item.empty()) {
+                            const std::string str = "data: " + item.dump(-1, ' ', false, json::error_handler_t::replace) + "\n\n";
+                            LOG_VERBOSE("data stream", {{"to_send", str}});
+                            if (!sink.write(str.c_str(), str.size())) {
+                                ctx_server.queue_results.remove_waiting_task_id(id_task);
+                                return false;
+                            }
+                        }
+                    }
+                    return true;
+                };
+
                 while (true) {
                     server_task_result result = ctx_server.queue_results.recv(id_task);
-                    if (!result.error) {
-                        if (!checked_function_call) {
-                            leading_str += result.data.value("content", "");
-                            if (leading_str.length() >= 15) {
-                                if (leading_str.find("starttoolcall") != std::string::npos) {
-                                    is_function_call = true;
-                                }
-                                checked_function_call = true;
-                            }
-                        }
-                        else {
-                            if (is_function_call) {
-                                leading_str += result.data.value("content", "");
-                            }
-                            else {
-                                if (leading_str.length() > 0) {
-                                    result.data["content"] = leading_str + result.data.value("content", "");
-                                    leading_str = "";
-                                }
-                                std::vector<json> result_array = format_partial_response_oaicompat(result.data, completion_id);
-
-                                for (auto it = result_array.begin(); it != result_array.end(); ++it) {
-                                    if (!it->empty()) {
-                                        const std::string str =
-                                            "data: " +
-                                            it->dump(-1, ' ', false, json::error_handler_t::replace) +
-                                            "\n\n";
-                                        LOG_VERBOSE("data stream", {{"to_send", str}});
-                                        if (!sink.write(str.c_str(), str.size())) {
-                                            ctx_server.queue_results.remove_waiting_task_id(id_task);
-                                            return false;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        
-                        if (result.stop) {
-                            if (leading_str.length() > 0) {
-                                last_result_data["content"] = leading_str;
-                                std::vector<json> result_array = format_partial_response_oaicompat(last_result_data, completion_id);
-
-                                for (auto it = result_array.begin(); it != result_array.end(); ++it) {
-                                    if (!it->empty()) {
-                                        const std::string str =
-                                            "data: " +
-                                            it->dump(-1, ' ', false, json::error_handler_t::replace) +
-                                            "\n\n";
-                                        LOG_VERBOSE("data stream", {{"to_send", str}});
-                                        if (!sink.write(str.c_str(), str.size())) {
-                                            ctx_server.queue_results.remove_waiting_task_id(id_task);
-                                            return false;
-                                        }
-                                    }
-                                }
-                                
-                                result_array = format_partial_response_oaicompat(result.data, completion_id);
-
-                                for (auto it = result_array.begin(); it != result_array.end(); ++it) {
-                                    if (!it->empty()) {
-                                        const std::string str =
-                                            "data: " +
-                                            it->dump(-1, ' ', false, json::error_handler_t::replace) +
-                                            "\n\n";
-                                        LOG_VERBOSE("data stream", {{"to_send", str}});
-                                        if (!sink.write(str.c_str(), str.size())) {
-                                            ctx_server.queue_results.remove_waiting_task_id(id_task);
-                                            return false;
-                                        }
-                                    }
-                                }
-                            }
-                            
-                            break;
-                        }
-                        else {
-                            last_result_data = result.data;
-                        }
-                    } else {
-                        const std::string str =
-                            "error: " +
-                            result.data.dump(-1, ' ', false, json::error_handler_t::replace) +
-                            "\n\n";
+                    if (result.error) {
+                        const std::string str = "error: " + result.data.dump(-1, ' ', false, json::error_handler_t::replace) + "\n\n";
                         LOG_VERBOSE("data stream", {{"to_send", str}});
                         if (!sink.write(str.c_str(), str.size())) {
                             ctx_server.queue_results.remove_waiting_task_id(id_task);
@@ -3188,7 +3124,43 @@ int main(int argc, char ** argv) {
                         }
                         break;
                     }
+
+                    if (!checked_function_call) {
+                        leading_str += result.data.value("content", "");
+                        if (leading_str.length() >= 15) {
+                            is_function_call = (leading_str.find("starttoolcall") != std::string::npos);
+                            checked_function_call = true;
+                        }
+                    } else {
+                        if (is_function_call) {
+                            leading_str += result.data.value("content", "");
+                        } else {
+                            if (!leading_str.empty()) {
+                                result.data["content"] = leading_str + result.data.value("content", "");
+                                leading_str.clear();
+                            }
+                            if (!process_and_send_data(result.data)) {
+                                return false;
+                            }
+                        }
+                    }
+
+                    if (result.stop) {
+                        if (!leading_str.empty()) {
+                            last_result_data["content"] = leading_str;
+                            if (!process_and_send_data(last_result_data)) {
+                                return false;
+                            }
+                        }
+                        if (!process_and_send_data(result.data)) {
+                            return false;
+                        }
+                        break;
+                    }
+
+                    last_result_data = result.data;
                 }
+
                 sink.done();
                 ctx_server.queue_results.remove_waiting_task_id(id_task);
                 return true;
