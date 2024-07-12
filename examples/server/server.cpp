@@ -3092,7 +3092,7 @@ int main(int argc, char ** argv) {
             ctx_server.queue_results.remove_waiting_task_id(id_task);
         } else {
             const auto chunked_content_provider = [id_task, &ctx_server, completion_id](size_t, httplib::DataSink & sink) {
-                std::string leading_str = "";
+                std::string last_str = "";
                 bool is_function_call = false;
                 bool checked_function_call = false;
                 json last_result_data;
@@ -3113,41 +3113,40 @@ int main(int argc, char ** argv) {
                     return true;
                 };
 
+
                 while (true) {
                     server_task_result result = ctx_server.queue_results.recv(id_task);
+
                     if (result.error) {
-                        const std::string str = "error: " + result.data.dump(-1, ' ', false, json::error_handler_t::replace) + "\n\n";
-                        LOG_VERBOSE("data stream", {{"to_send", str}});
-                        if (!sink.write(str.c_str(), str.size())) {
+                        const std::string error_str = "error: " + result.data.dump(-1, ' ', false, json::error_handler_t::replace) + "\n\n";
+                        LOG_VERBOSE("data stream", {{"to_send", error_str}});
+                        if (!sink.write(error_str.c_str(), error_str.size())) {
                             ctx_server.queue_results.remove_waiting_task_id(id_task);
                             return false;
                         }
                         break;
                     }
 
-                    if (!checked_function_call) {
-                        leading_str += result.data.value("content", "");
-                        if (leading_str.length() >= 15) {
-                            is_function_call = (leading_str.find("starttoolcall") != std::string::npos);
-                            checked_function_call = true;
+                    std::string content = result.data.value("content", "");
+                    if (!is_function_call) {
+                        std::string str_to_check = last_str + content;
+                        is_function_call = (str_to_check.find("starttool") != std::string::npos);
+                    }
+
+                    if (!is_function_call && !last_str.empty()) {
+                        std::string temp_str = content;
+                        result.data["content"] = last_str;
+                        last_str = temp_str;
+                        if (!process_and_send_data(result.data)) {
+                            return false;
                         }
                     } else {
-                        if (is_function_call) {
-                            leading_str += result.data.value("content", "");
-                        } else {
-                            if (!leading_str.empty()) {
-                                result.data["content"] = leading_str + result.data.value("content", "");
-                                leading_str.clear();
-                            }
-                            if (!process_and_send_data(result.data)) {
-                                return false;
-                            }
-                        }
+                        last_str += content;
                     }
 
                     if (result.stop) {
-                        if (!leading_str.empty()) {
-                            last_result_data["content"] = leading_str;
+                        if (!last_str.empty()) {
+                            last_result_data["content"] = last_str;
                             if (!process_and_send_data(last_result_data)) {
                                 return false;
                             }
@@ -3160,6 +3159,7 @@ int main(int argc, char ** argv) {
 
                     last_result_data = result.data;
                 }
+
 
                 sink.done();
                 ctx_server.queue_results.remove_waiting_task_id(id_task);
