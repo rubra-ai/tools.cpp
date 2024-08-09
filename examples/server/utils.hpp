@@ -361,6 +361,13 @@ static json oaicompat_completion_params_parse(
     llama_params["__oaicompat"] = true;
     json tool_name_map;
     const std::vector<json> expanded_messages = expand_messages(body, tool_name_map);
+    llama_params["tool_field"] = "tool_calls";
+    if (body.contains("tools") && !body["tools"].empty()) {
+        llama_params["tool_field"] = "tool_calls";
+    }
+    else if (body.contains("functions") && !body["functions"].empty()) {
+        llama_params["tool_field"] = "function_call";
+    }
     llama_params["prompt"] = format_chat(model, chat_template, expanded_messages);
     llama_params["tool_name_map"] = tool_name_map;
 
@@ -518,7 +525,6 @@ static std::vector<json> format_partial_response_oaicompat(json result, const st
     if (!result.contains("model") || !result.contains("oaicompat_token_ctr")) {
         return std::vector<json>({result});
     }
-
     bool first = json_value(result, "oaicompat_token_ctr", 0) == 0;
     std::string modelname = json_value(result, "model", std::string(DEFAULT_OAICOMPAT_MODEL));
 
@@ -527,6 +533,7 @@ static std::vector<json> format_partial_response_oaicompat(json result, const st
     bool stopped_limit  = json_value(result, "stopped_limit", false);
     std::string content = json_value(result, "content",       std::string(""));
     std::vector<json> parsed_content = rubra_fc_json_tool_extractor(content);
+    std::string tool_field = json_value(result, "tool_field",       std::string("tool_calls"));
 
     std::string finish_reason;
     if (stopped_word || stopped_eos) {
@@ -535,7 +542,6 @@ static std::vector<json> format_partial_response_oaicompat(json result, const st
     if (stopped_limit) {
         finish_reason = "length";
     }
-
     std::time_t t = std::time(0);
 
     json choices;
@@ -544,6 +550,7 @@ static std::vector<json> format_partial_response_oaicompat(json result, const st
         choices = json::array({json{{"finish_reason", finish_reason},
                                     {"index", 0},
                                     {"delta", json::object()}}});
+
     } else {
         if (first) {
             if (content.empty()) {
@@ -592,10 +599,27 @@ static std::vector<json> format_partial_response_oaicompat(json result, const st
                         };
                         oai_format_tool_calls.push_back(tool_call);
                     }
-                    choices = json::array({json{{"finish_reason", nullptr},
+                    if (tool_field == "tool_calls") {
+                        choices = json::array({json{{"finish_reason", nullptr},
                                                 {"index", 0},
-                                                {"delta", json{{"tool_calls", oai_format_tool_calls},
+                                                {"delta", json{{tool_field, oai_format_tool_calls},
                                                                 {"role", "assistant"}}}}});
+                    }
+                    else {
+                        choices = json::array({json{{"finish_reason", nullptr},
+                                                {"index", 0},
+                                                {"delta", json{{tool_field, oai_format_tool_calls[0]["function"]},
+                                                                {"role", "assistant"}}}}});
+                    }
+                    
+                    json second_ret = json{
+                                {"choices", choices},
+                                {"created", t},
+                                {"id", completion_id},
+                                {"model", modelname},
+                                {"object", "chat.completion.chunk"}};
+                    
+                    return std::vector<json>({initial_ret, second_ret});
                 }
                 
             }
@@ -632,10 +656,18 @@ static std::vector<json> format_partial_response_oaicompat(json result, const st
                     };
                     oai_format_tool_calls.push_back(tool_call);
                 }
-                choices = json::array({json{{"finish_reason", nullptr},
+                if (tool_field == "tool_calls") {
+                    choices = json::array({json{{"finish_reason", nullptr},
                                             {"index", 0},
-                                            {"delta", json{{"tool_calls", oai_format_tool_calls},
+                                            {"delta", json{{tool_field, oai_format_tool_calls},
                                                             {"role", "assistant"}}}}});
+                }
+                else {
+                    choices = json::array({json{{"finish_reason", nullptr},
+                                            {"index", 0},
+                                            {"delta", json{{tool_field, oai_format_tool_calls[0]["function"]},
+                                                            {"role", "assistant"}}}}});
+                }
             }
             
         }
@@ -657,7 +689,7 @@ static std::vector<json> format_partial_response_oaicompat(json result, const st
             {"total_tokens",      num_tokens_predicted + num_prompt_tokens}
         }});
     }
-
+    
     return std::vector<json>({ret});
 }
 

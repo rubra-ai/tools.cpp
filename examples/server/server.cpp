@@ -3073,6 +3073,7 @@ int main(int argc, char ** argv) {
         res.set_header("Access-Control-Allow-Origin", req.get_header_value("Origin"));
         json data = oaicompat_completion_params_parse(ctx_server.model, json::parse(req.body), params.chat_template);
 
+
         const int id_task = ctx_server.queue_tasks.get_new_id();
 
         ctx_server.queue_results.add_waiting_task_id(id_task);
@@ -3091,14 +3092,13 @@ int main(int argc, char ** argv) {
             }
             ctx_server.queue_results.remove_waiting_task_id(id_task);
         } else {
-            const auto chunked_content_provider = [id_task, &ctx_server, completion_id](size_t, httplib::DataSink & sink) {
+            const auto chunked_content_provider = [id_task, &ctx_server, completion_id, data](size_t, httplib::DataSink & sink) {
                 std::string last_str = "";
                 bool is_function_call = false;
                 bool checked_function_call = false;
                 json last_result_data;
-
-                auto process_and_send_data = [&](const json& data) {
-                    std::vector<json> result_array = format_partial_response_oaicompat(data, completion_id);
+                auto process_and_send_data = [&](const json& res_data) {
+                    std::vector<json> result_array = format_partial_response_oaicompat(res_data, completion_id);
 
                     for (const auto& item : result_array) {
                         if (!item.empty()) {
@@ -3116,7 +3116,9 @@ int main(int argc, char ** argv) {
 
                 while (true) {
                     server_task_result result = ctx_server.queue_results.recv(id_task);
-
+                    if (data.contains("tool_field")) {
+                        result.data["tool_field"] = data["tool_field"];
+                    }
                     if (result.error) {
                         const std::string error_str = "error: " + result.data.dump(-1, ' ', false, json::error_handler_t::replace) + "\n\n";
                         LOG_VERBOSE("data stream", {{"to_send", error_str}});
@@ -3132,7 +3134,6 @@ int main(int argc, char ** argv) {
                         std::string str_to_check = last_str + content;
                         is_function_call = (str_to_check.find("starttool") != std::string::npos);
                     }
-
                     if (!is_function_call && !last_str.empty()) {
                         std::string temp_str = content;
                         result.data["content"] = last_str;

@@ -226,6 +226,9 @@ std::string construct_json_tool_call_str(const json& tool_calls, nlohmann::order
 }
 
 
+
+
+
 const std::vector<json> expand_messages(const json & body, json &tool_name_map) {
     std::string function_str = "";
     if (body.contains("tools") && !body["tools"].empty()) {
@@ -243,13 +246,11 @@ const std::vector<json> expand_messages(const json & body, json &tool_name_map) 
             for (size_t i = 0; i < body["messages"].size(); ++i) {
                 if (body["messages"][i]["role"] != "tool" and func_observation_map.size() > 0) {
                     // insert the observation from the tool call before the next message
-                    std::string observation_str = "";
-                    std::vector<std::string> func_observation_array;
+                    json func_json_array = json::array();
                     for (const auto& [key, value] : func_observation_map) {
-                        func_observation_array.push_back(value);
+                        func_json_array.push_back(value);
                     }
-                    json func_json_array = func_observation_array;
-                    observation_str = std::string("start observation ") + func_json_array.dump() + std::string(" end observation");
+                    std::string observation_str = "start observation " + func_json_array.dump() + " end observation";
                     json observation_call;
                     observation_call["role"] = "user";
                     observation_call["content"] = observation_str;
@@ -274,10 +275,15 @@ const std::vector<json> expand_messages(const json & body, json &tool_name_map) 
                     }
                 }
                 // else if (body["messages"][i]["role"] == "assistant" and (body["messages"][i]["content"].is_null() or body["messages"][i]["content"]=="") and !body["messages"][i]["tool_calls"].is_null() and !body["messages"][i]["tool_calls"].empty()){
-                else if (body["messages"][i]["role"] == "assistant" and body["messages"][i].contains("tool_calls")){
+                else if (body["messages"][i]["role"] == "assistant" and (body["messages"][i].contains("tool_calls") or body["messages"][i].contains("function_call"))){
                     // convert OpenAI function call format to Rubra format
-                    // string tool_call_str = construct_python_tool_call_str(body["messages"][i]["tool_calls"], func_observation_map);
-                    std::string tool_call_str = construct_json_tool_call_str(body["messages"][i]["tool_calls"], func_observation_map);
+                    std::string tool_call_str;
+                    if (body["messages"][i].contains("tool_calls")) {
+                        tool_call_str = construct_json_tool_call_str(body["messages"][i]["tool_calls"], func_observation_map);
+                    }
+                    else {
+                        tool_call_str = std::string("starttoolcall") + body["messages"][i]["function_call"].dump() + std::string("endtoolcall");
+                    }
                     json function_call;
                     function_call["role"] = "assistant";
                     function_call["content"] = tool_call_str;
@@ -293,6 +299,15 @@ const std::vector<json> expand_messages(const json & body, json &tool_name_map) 
                     }
 
                 }
+                else if (body["messages"][i]["role"] == "function") {
+                    json func_json_array = json::array();
+                    func_json_array.push_back(body["messages"][i]["content"]);
+                    std::string observation_str = std::string("start observation ") + func_json_array.dump() + std::string(" end observation");
+                    json observation_call;
+                    observation_call["role"] = "user";
+                    observation_call["content"] = observation_str;
+                    temp_vec.push_back(observation_call);
+                }
                 else {
                     temp_vec.push_back(body["messages"][i]);
                 }
@@ -300,13 +315,11 @@ const std::vector<json> expand_messages(const json & body, json &tool_name_map) 
             }
             if (func_observation_map.size() > 0) {
                 // insert the observation from the tool call before the next message
-                std::string observation_str = "";
-                std::vector<std::string> func_observation_array;
+                json func_json_array = json::array();
                 for (const auto& [key, value] : func_observation_map) {
-                    func_observation_array.push_back(value);
+                    func_json_array.push_back(value);
                 }
-                json func_json_array = func_observation_array;
-                observation_str = std::string("start observation ") + func_json_array.dump() + std::string(" end observation");
+                std::string observation_str = "start observation " + func_json_array.dump() + " end observation";
                 json observation_call;
                 observation_call["role"] = "user";
                 observation_call["content"] = observation_str;
