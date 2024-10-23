@@ -1,5 +1,11 @@
 # Extensions
 
+*package-lock.json
+*package.json
+*node_modules
+*.ipynb
+.*.json
+
 *.a
 *.bat
 *.bin

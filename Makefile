@@ -1453,6 +1453,8 @@ endif # GGML_RPC
 llama-server: \
 	examples/server/server.cpp \
 	examples/server/utils.hpp \
+	examples/server/function-call-parser.hpp \
+	examples/server/function-call.hpp \
 	examples/server/httplib.h \
 	examples/server/colorthemes.css.hpp \
 	examples/server/style.css.hpp \

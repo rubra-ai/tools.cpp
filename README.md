@@ -1,14 +1,124 @@
-# llama.cpp
+# tools.cpp
+tools.cpp is Rubra's fork of llama.cpp, offering inference of Rubra's function calling models (and others) in pure C/C++.
 
-![llama](https://user-images.githubusercontent.com/1991296/230134379-7181e485-c521-4d23-a0d6-f7b3b61ba524.png)
+## tools.cpp quickstart
+1. build from source:
+   
+- Mac user
+```
+make
+```
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![Server](https://github.com/ggerganov/llama.cpp/actions/workflows/server.yml/badge.svg)](https://github.com/ggerganov/llama.cpp/actions/workflows/server.yml)
-[![Conan Center](https://shields.io/conan/v/llama-cpp)](https://conan.io/center/llama-cpp)
+- Nvidia-Cuda user:
+```
+make LLAMA_CUDA=1
+```
 
-[Roadmap](https://github.com/users/ggerganov/projects/7) / [Project status](https://github.com/ggerganov/llama.cpp/discussions/3471) / [Manifesto](https://github.com/ggerganov/llama.cpp/discussions/205) / [ggml](https://github.com/ggerganov/ggml)
+2. Install a helper package that fixes some rare edgecases:
+```
+npm install jsonrepair
+```
 
-Inference of Meta's [LLaMA](https://arxiv.org/abs/2302.13971) model (and others) in pure C/C++
+3. Download a compatible Rubra GGUF model:
+For example:
+```
+wget https://huggingface.co/rubra-ai/Meta-Llama-3-8B-Instruct-GGUF/resolve/main/rubra-meta-llama-3-8b-instruct.Q6_K.gguf
+```
+
+For large multi-part model files, such as [rubra-meta-llama-3-70b-instruct_Q6_K-0000*-of-00003.gguf](https://huggingface.co/rubra-ai/Meta-Llama-3-70B-Instruct-GGUF/tree/main), use the following command to merge them before proceeding to the next step:
+```
+./llama-gguf-split --merge rubra-meta-llama-3-70b-instruct_Q6_K-0000*-of-00003.gguf rubra-meta-llama-3-70b-instruct_Q6_K.gguf
+```
+This will merge multi-part model files to one gguf file `rubra-meta-llama-3-70b-instruct_Q6_K.gguf`.
+
+4. start openai compatible server:
+```
+./llama-server -ngl 37 -m rubra-meta-llama-3-8b-instruct.Q6_K.gguf   --port 1234 --host 0.0.0.0  -c 8000 --chat-template llama3
+```
+
+5. Test the server, ensure it is available:
+```bash
+curl localhost:1234/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer tokenabc-123" \
+  -d '{
+    "model": "rubra-model",
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are a helpful assistant."
+      },
+      {
+        "role": "user",
+        "content": "hello"
+      }
+    ]
+  }'
+```
+
+6. Try a python function calling example:
+```python
+# if openai not installed, do `pip install openai`
+from openai import OpenAI
+client = OpenAI(api_key="123", base_url = "http://localhost:1234/v1/")
+
+tools = [
+  {
+    "type": "function",
+    "function": {
+      "name": "get_current_weather",
+      "description": "Get the current weather in a given location",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "location": {
+            "type": "string",
+            "description": "The city and state, e.g. San Francisco, CA",
+          },
+          "unit": {"type": "string", "enum": ["celsius", "fahrenheit"]},
+        },
+        "required": ["location"],
+      },
+    }
+  }
+]
+messages = [{"role": "user", "content": "What's the weather like in Boston today?"}]
+completion = client.chat.completions.create(
+  model="rubra-model",
+  messages=messages,
+  tools=tools,
+  tool_choice="auto"
+)
+
+print(completion)
+```
+
+The output should look like this:
+```
+ChatCompletion(id='chatcmpl-EmHd8kai4DVwBUOyim054GmfcyUbjiLf', choices=[Choice(finish_reason='tool_calls', index=0, logprobs=None, message=ChatCompletionMessage(content=None, role='assistant', function_call=None, tool_calls=[ChatCompletionMessageToolCall(id='e885974b', function=Function(arguments='{"location":"Boston"}', name='get_current_weather'), type='function')]))], created=1719528056, model='rubra-model', object='chat.completion', system_fingerprint=None, usage=CompletionUsage(completion_tokens=29, prompt_tokens=241, total_tokens=270))
+```
+
+That's it! MAKE SURE you turn `stream` OFF when making api calls to the server, as the streaming feature is not supported yet. And we will support streaming too soon.
+
+For more function calling examples, you can checkout `test_llamacpp.ipynb` notebook.
+
+### Choosing a Chat Template for Different Models
+
+| Model   | Chat Template |
+|---------|:-------------:|
+| Llama3  |     llama3    |
+| Mistral |     llama2    |
+| Phi3    |      phi3     |
+| Gemma   |     gemma     |
+| Qwen2   |     chatml    |
+
+For example, to run [Rubra's enhanced Phi3 model](https://huggingface.co/rubra-ai/Phi-3-mini-128k-instruct-function-calling-alpha-v1-GGUF), use the following command:
+
+```bash
+./llama-server -ngl 37 -m phi-3-mini-128k-instruct-function-calling-alpha-v1.Q8_0.gguf --port 1234 --host 0.0.0.0 -c 32000 --chat-template phi3
+```
+
+==============================================================================
 
 ## Recent API changes
 
