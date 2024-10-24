@@ -96,7 +96,6 @@ json clean_json_strings(const std::string& input_str) {
 
 std::vector<json> rubra_fc_json_tool_extractor(const std::string& output_str) {
     std::vector<json> result;
-    std::cout << "Output to Parse : " << output_str.c_str() << std::endl;
     if (output_str.find("endtoolcall") == std::string::npos) {
         return result;
     }

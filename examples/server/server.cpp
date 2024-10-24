@@ -1585,6 +1585,66 @@ struct server_context {
         }
     }
 
+    void receive_cmpl_results_stream_handlefc(
+            const std::unordered_set<int> & id_tasks, const
+            json& data, const
+            std::function<bool(server_task_result&)> & result_handler, const
+            std::function<void(json)> & error_handler) {
+        size_t n_finished = 0;
+        std::string last_str = "";
+        bool is_function_call = false;
+        bool checked_function_call = false;
+        json last_result_data;
+        while (true) {
+            server_task_result result = queue_results.recv(id_tasks);
+            if (data.contains("tool_field")) {
+                result.data["tool_field"] = data["tool_field"];
+            }
+            std::string content = result.data.value("content", "");
+            if (!is_function_call) {
+                std::string str_to_check = last_str + content;
+                is_function_call = (str_to_check.find("starttool") != std::string::npos);
+            }
+            if (!is_function_call && !last_str.empty()) {
+                std::string temp_str = content;
+                result.data["content"] = last_str;
+                last_str = temp_str;
+                if (!result_handler(result)) {
+                    cancel_tasks(id_tasks);
+                    break;
+                }
+            } else {
+                last_str += content;
+            }
+
+            if (result.error) {
+                error_handler(result.data);
+                cancel_tasks(id_tasks);
+                break;
+            }
+
+            if (result.stop) {
+                if (!last_str.empty()) {
+                    last_result_data["content"] = last_str;
+                    server_task_result temp_result = result;
+                    temp_result.data = last_result_data;
+                    if (!result_handler(temp_result)) {
+                        cancel_tasks(id_tasks);
+                        break;
+                    }
+                }
+                if (!result_handler(result)) {
+                    cancel_tasks(id_tasks);
+                    break;
+                }
+                if (++n_finished == id_tasks.size()) {
+                    break;
+                }
+            }
+            last_result_data = result.data;
+        }
+    }
+
     //
     // Functions to process the task
     //
@@ -3019,8 +3079,8 @@ int main(int argc, char ** argv) {
 
             ctx_server.queue_results.remove_waiting_task_ids(task_ids);
         } else {
-            const auto chunked_content_provider = [task_ids, &ctx_server, completion_id](size_t, httplib::DataSink & sink) {
-                ctx_server.receive_cmpl_results_stream(task_ids, [&](const server_task_result & result) -> bool {
+            const auto chunked_content_provider = [task_ids, &ctx_server, completion_id, data](size_t, httplib::DataSink & sink) {
+                ctx_server.receive_cmpl_results_stream_handlefc(task_ids, data, [&](const server_task_result & result) -> bool {
                     std::vector<json> result_array = format_partial_response_oaicompat(result.data, completion_id);
                     for (auto & event_data : result_array) {
                         if (event_data.empty()) {
